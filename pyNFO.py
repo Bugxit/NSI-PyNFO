@@ -1,66 +1,58 @@
-from os import walk
-from math import floor, ceil
+import api
+import os
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3
 
 def getFiles() -> list:
-    filesList = []
-    for (dirpath, dirnames, filenames) in walk("."):
+    filesList = {}
+    for (dirpath, dirnames, filenames) in os.walk("."):
         for file in filenames:
             if file[-4:] == ".mp3":
                 tubeName = (ID3(dirpath+"/"+file))['TALB'].text[0]
-                for position, tube in enumerate(filesList+[' ']):
-                    if tubeName == tube[0]:
-                        filesList[position].append(dirpath+"/"+file)
-                        break
-                    elif tube[0] == ' ':
-                        filesList.append([tubeName, dirpath+"/"+file])
+                if tubeName in filesList:
+                    filesList[tubeName].append(dirpath+"/"+file)
+                else:
+                    filesList[tubeName] = [dirpath+"/"+file]
     for files in filesList:
-        files[1:].sort()
-
+        filesList[files].sort()
     return filesList
 
-def createNfoFile(files : list) -> None:
-    nfoFile = open(f"{files[0]}.nfo", "w")
-    globalInfos = ID3(files[1])
-    writeMinus(nfoFile)
-    writeCentered(nfoFile, f'{globalInfos["TPE1"].text[0]} - {files[0]}')
-    writeMinus(nfoFile)
+def createNfoFile(file : list, filesList : dict) -> None:
+    nfoFile = open(f"{file}.nfo", "w")
+    globalInfosID3 = ID3(filesList[file][0])
+    globalInfosMP3 = MP3(filesList[file][0])
+    api.writeMinus(nfoFile)
+    api.writeCentered(nfoFile, f'{globalInfosID3["TPE1"].text[0]} - {globalInfosID3["TALB"].text[0]}')
+    api.writeMinus(nfoFile)
     nfoFile.write("\n")
-    for func in ["artist", "album", "genre"]:
-        globals()[func](nfoFile, globalInfos)
-
-def genre(file, infos) -> None:
-    file.write("Genre")
-    writeDot(file, 15)
-    file.write(f'{infos["TCON"].text[0]}\n')
-
-def album(file, infos) -> None:
-    file.write("Album")
-    writeDot(file, 15)
-    file.write(f"{infos['TALB'].text[0]}\n")    
-
-def artist(file, infos) -> None:
-    file.write("Artist")
-    writeDot(file, 14)
-    file.write(f"{infos['TPE1'].text[0]}\n")
-
-def writeCentered(file, text: str) -> None:
-    for loop in range(floor((70-len(text))/2)):
-        file.write(" ")
-    file.write(f"{text}\n")
-
-def writeDot(file, number : int) -> None:
-    for loop in range(number):
-        file.write(".")
-    file.write(": ")
-
-def writeMinus(file) -> None:
-    for loop in range(70):
-        file.write("-")
-    file.write('\n')
+    for func in ["artist", "album", "genre", "year", "ripper", "format", "quality", "channels", "sampling_rate", "mode", "cover"]:
+        getattr(api, func)(nfoFile, globalInfosID3, globalInfosMP3)
+    nfoFile.write("\n\n")
+    api.writeMinus(nfoFile)
+    api.writeCentered(nfoFile, "Tracklisting")
+    api.writeMinus(nfoFile)
+    nfoFile.write("\n")
+    totalTime = 0
+    totalSize = 0
+    for music in filesList[file]:
+        nfoFile.write(f"    {music[2+len(globalInfosID3['TPE1'].text[0]):]}")
+        musicInfo = MP3(music)
+        for loop in range(59-len(music[2+len(globalInfosID3['TPE1'].text[0]):])):
+            nfoFile.write(" ")
+        minutes = str(int(musicInfo.info.length//60))
+        if int(musicInfo.info.length//60) < 10:
+            minutes = "0" + minutes
+        seconds = str(int(musicInfo.info.length-60*int(minutes)))
+        if int(musicInfo.info.length-60*int(minutes)) < 10:
+            seconds = "0" + seconds
+        nfoFile.write(f"[{minutes}:{seconds}]\n")
+        totalSize += os.path.getsize(music[2:])
+        totalTime += musicInfo.info.length
+    nfoFile.write("\n")
+    api.playing_time(nfoFile, totalTime)
+    api.total_size(nfoFile, totalSize)
 
 if __name__ == "__main__":
     filesList = getFiles()
     for files in filesList:
-        createNfoFile(files)
+        createNfoFile(files, filesList)
